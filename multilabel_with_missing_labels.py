@@ -178,13 +178,13 @@ def run_trade_study(num_epochs=10, batch_size=50, missing_label_probabilities=MI
         for c in CLASSES:
             labels = (f'not_{c}', f'{c}')
             confusion = pd.DataFrame(
-                confusion_matrix(df['true_' + c], df['pred_' + c]),
-                columns=[f'pred_{labels[0]}', f'{labels[0]}'],
-                index=[f'true_{labels[0]}', f'{labels[0]}'])
+                confusion_matrix(df['true_' + c].round(), df['pred_' + c].round()),
+                columns=[f'pred_{labels[0]}', f'pred_{labels[1]}'],
+                index=[f'true_{labels[0]}', f'true_{labels[1]}'])
             confusions[-1].append(confusion)
             print(confusion)
-            print(classification_report(df_true[c], df_pred[c], labels=labels))
-        label_acc = 1.0 - np.sum(np.abs((df_pred.values - df_true.values)), axis=0) / len(df_test)
+            print(classification_report(df['true_' + c].round(), df['pred_' + c].round(), target_names=labels))
+        label_acc = 1.0 - np.sum(np.abs((df_pred.values - df_true.values)), axis=0) / len(df_true)
         name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
         filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
 
@@ -206,6 +206,7 @@ if __name__ == '__main__':
     batch_size = 50
     if len(sys.argv[2:]):
         batch_size = int(sys.argv[2])
+    print(f'Starting {num_epochs} epochs of training, with batch_size={batch_size}')
     run_trade_study(num_epochs=num_epochs, batch_size=batch_size)
 
 
