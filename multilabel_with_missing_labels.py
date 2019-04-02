@@ -1,25 +1,39 @@
-""" Testing that it's possible to skip missing values by flagging them with -1 (or any other value) if they are ignored in the loss function.
+""" Confirmation that skipping some missing labels by flagging them with -1 successfully blocks backpropagaion.
 
-Test set accuracy is only mildly reduced for a simple CNN image recognition, multi-label problem.
+(or any other value) if they are ignored in the loss function.
+
+Test set accuracy is only mildly reduced for a simple CNN image recognition, multi-label problem. 
+But it's only ~75% accurate with 0 missing labels, which is piss poor.
+
+Francois Chollet suggests using the Merge and Masking layers to mask the input.[1]
+    ## 
+    ## uses the functional Keras API:
+    # from keras.layers import Masking, Merge
+    # Merge([network_outputs, Masking(mask_value=MISSING_LABEL_FLAG)(mask_input)], mode=lambda xs: xs[0], output_mask=lambda xs: xs[1])
 
 Reference:
-   Masked loss function approach by @tivaro: https://github.com/keras-team/keras/issues/3893
-   Merge and Mask layers per Francois Chollet (@fchollet): https://github.com/keras-team/keras/issues/3206 
+   [1] Masked loss function approach by @tivaro: https://github.com/keras-team/keras/issues/3893
+   [2] Merge and Mask layers per Francois Chollet (@fchollet): https://github.com/keras-team/keras/issues/3206 
+   [3] https://github.com/keras-team/keras/issues/3206#issuecomment-232446030
 """
 import os
 
 import numpy as np
-# import matplotlib.pyplot as plt
 import pandas as pd
 import h5py
-from sklearn.model_selection import train_test_split
 import keras.backend as K
 import keras
-from keras.datasets import mnist
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Flatten
 from keras.layers import Conv2D, MaxPooling2D, Convolution2D, Activation
 from keras.optimizers import SGD
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+
+# try training CNN on a completely different task in parallel?
+# import matplotlib.pyplot as plt
+# from keras.datasets import mnist
 
 if not 'workbookDir' in globals():
     BASE_DIR = os.path.abspath(os.getcwd())
@@ -89,8 +103,11 @@ def masked_accuracy(y_true, y_pred):
     return correct / total
 
 
+confusions = []
+testset_preds = []
+
 for missing_label_prob in MISSING_LABEL_PROBS:
-    print('Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG}...')
+    print(f'Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG} (flag them as missing).')
     y_train = y_train_orig.copy()
     mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
     y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
@@ -117,13 +134,6 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     model.add(Dropout(0.5))
     model.add(Dense(num_classes))
     model.add(Activation('sigmoid'))
-
-    ## This is what Francois suggests for merging model outputs and using an mask on the input
-    ## https://github.com/keras-team/keras/issues/3206#issuecomment-232446030
-    ## uses the functional Keras API:
-    # from keras.layers import Masking, Merge
-    # Merge([network_outputs, Masking(mask_value=MISSING_LABEL_FLAG)(mask_input)], mode=lambda xs: xs[0], output_mask=lambda xs: xs[1])
-
 
     model.compile(loss=build_masked_loss(),
                 optimizer='adam',
@@ -153,10 +163,21 @@ for missing_label_prob in MISSING_LABEL_PROBS:
 
 
     infer(x_test, model=model)
-    df_test = pd.DataFrame(model.predict(x_test), columns=['pred_' + c for c in CLASSES])
+    df_pred = pd.DataFrame(model.predict(x_test), columns=['pred_' + c for c in CLASSES])
     df_true = pd.DataFrame(y_test, columns=['true_' + c for c in CLASSES])
-    df = pd.concat([df_test, df_true], axis=1)
-
+    df = pd.concat([df_pred, df_true], axis=1)
+    print(df.head())
+    testset_preds.append(df)
+    confusions.append([])
+    for c in CLASSES:
+        labels = (f'not_{c}', f'{c}')
+        confusion = pd.DataFrame(
+            confusion_matrix(df_true[c], df_pred[c]),
+            columns=[f'pred_{labels[0]}', f'{labels[0]}'],
+            index=[f'true_{labels[0]}', f'{labels[0]}'])
+        confusions[-1].append(confusion)
+        print(confusion)
+        print(classification_report(df_true[c], df_pred[c], labels=labels))
     label_acc = 1.0 - np.sum(np.abs((df_test.values - df_true.values)), axis=0) / len(df_test)
     name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
     filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
@@ -165,4 +186,10 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     print(f"filepath: {filepath}")
     model.save(filepath + ".h5")
     df.to_csv(filepath + ".csv")
+
+
+# should save results in one big h5:
+# print(confusions)
+# print([df.head() for df in testset_preds])
+
 
