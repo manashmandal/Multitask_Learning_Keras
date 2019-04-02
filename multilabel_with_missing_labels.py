@@ -31,29 +31,24 @@ MODEL_FILEPATH = os.path.join(DATA_DIR, 'multitask_model.h5')
 print('DATA_FILEPATH: ' + DATA_FILEPATH)
 assert(os.path.isfile(DATA_FILEPATH))
 
-def load():
+def load(test_size=.2, random_state=100):
     f = h5py.File(os.path.join(BASE_DIR, 'data', 'dataset.h5'))
     x = f['x'].value
     y = f['y'].value
     f.close()
-    x_train , x_test, y_train, y_test = train_test_split(x,y,test_size=0.2,random_state=100)
+    x_train , x_test, y_train, y_test = train_test_split(
+        x, y, test_size=test_size, random_state=random_state)
     x_train = np.rollaxis(x_train, 1, 4)
     x_test = np.rollaxis(x_test, 1, 4)
     x_train = x_train  / 255.0
     x_test = x_test / 255.0
     return x_train, x_test, y_train, y_test
 
-x_train, x_test, y_train, y_test = load()
-
-
-# In[11]:
+x_train, x_test, y_train_orig, y_test = load()
 
 
 MISSING_LABEL_FLAG = -1
-MISSING_LABEL_PROB = 0
 
-y_train_missing = np.random.rand(*y_train.shape) < MISSING_LABEL_PROB
-y_train[y_train_missing] = MISSING_LABEL_FLAG
 
 def build_masked_loss(loss_function, mask_value=MISSING_LABEL_FLAG):
     """Builds a loss function that masks based on targets
@@ -80,11 +75,11 @@ def masked_accuracy(y_true, y_pred):
     return correct / total
 
 
-# In[13]:
-
+MISSING_LABEL_PROBS = [0, .25, .5, .75]
+CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
 
 batch_size = 50
-num_classes = 5
+num_classes = len(CLASSES)
 epochs = 4
 
 
@@ -92,103 +87,79 @@ epochs = 4
 img_rows, img_cols = 100, 100
 channels = 3
 
-model = Sequential()
-model.add(Conv2D(32, kernel_size=(3, 3),padding='same',input_shape=(img_rows, img_cols, channels)))
-model.add(Activation('relu'))
-model.add(Conv2D(32, (3, 3)))
-model.add(Activation('relu'))
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
+for missing_label_prob in MISSING_LABEL_PROBS:
+    y_train = y_train_orig.copy()
+    mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
+    y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
 
-model.add(Conv2D(64,(3, 3), padding='same'))
-model.add(Activation('relu'))
-model.add(Conv2D(64, (3, 3)))
-model.add(Activation('relu'))
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
+    model = Sequential()
+    model.add(Conv2D(32, kernel_size=(3, 3),
+        padding='same', input_shape=(img_rows, img_cols, channels)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(32, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(0.25))
 
-model.add(Flatten())
-model.add(Dense(512))
-model.add(Activation('relu'))
-model.add(Dropout(0.5))
-model.add(Dense(num_classes))
-model.add(Activation('sigmoid'))
+    model.add(Conv2D(64,(3, 3), padding='same'))
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(0.25))
 
-## This is what Francois suggests for merging model outputs and using an mask on the input
-## https://github.com/keras-team/keras/issues/3206#issuecomment-232446030
-## uses the functional Keras API:
-# from keras.layers import Masking, Merge
-# Merge([network_outputs, Masking(mask_value=MISSING_LABEL_FLAG)(mask_input)], mode=lambda xs: xs[0], output_mask=lambda xs: xs[1])
+    model.add(Flatten())
+    model.add(Dense(512))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(num_classes))
+    model.add(Activation('sigmoid'))
 
-
-model.compile(loss=build_masked_loss(K.binary_crossentropy),
-              optimizer='adam',
-              metrics=['accuracy'])
-
-model.fit(x_train, y_train,
-          batch_size=batch_size,
-          epochs=epochs,
-          verbose=1,
-          validation_data=(x_test, y_test))
+    ## This is what Francois suggests for merging model outputs and using an mask on the input
+    ## https://github.com/keras-team/keras/issues/3206#issuecomment-232446030
+    ## uses the functional Keras API:
+    # from keras.layers import Masking, Merge
+    # Merge([network_outputs, Masking(mask_value=MISSING_LABEL_FLAG)(mask_input)], mode=lambda xs: xs[0], output_mask=lambda xs: xs[1])
 
 
-# In[25]:
+    model.compile(loss=build_masked_loss(K.binary_crossentropy),
+                optimizer='adam',
+                metrics=['accuracy'])
+
+    model.fit(x_train, y_train,
+            batch_size=batch_size,
+            epochs=epochs,
+            verbose=1,
+            validation_data=(x_test, y_test))
 
 
-CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
-
-def infer(input_data, model=model):
-    labels = []
-    y_pred = model.predict(input_data)
-    
-    # Performing masking
-    y_pred = (y_pred > 0.5) * 1.0
-    
-    for i in range(y_pred.shape[0]):
-        # select the indices
-        indices = np.where(y_pred[i] == 1.0)[0]
-        # Adding the results 
-        labels.append(CLASSES[indices].tolist())
+    def infer(input_data, model=model):
+        labels = []
+        y_pred = model.predict(input_data)
         
-    return labels
+        # Performing masking
+        y_pred = (y_pred > 0.5) * 1.0
+        
+        for i in range(y_pred.shape[0]):
+            # select the indices
+            indices = np.where(y_pred[i] == 1.0)[0]
+            # Adding the results 
+            labels.append(CLASSES[indices].tolist())
+            
+        return labels
 
 
-# In[26]:
+    infer(x_test, model=model)
+    df_test = pd.DataFrame(model.predict(x_test), columns=['pred_' + c for c in CLASSES])
+    df_true = pd.DataFrame(y_test, columns=['true_' + c for c in CLASSES])
+    df = pd.concat([df_test, df_true], axis=1)
 
+    label_acc = np.sum(np.abs((df_test.values - df_true.values)), axis=0) / len(df_test)
+    name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
+    filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
 
-model.save(MODEL_FILEPATH)
-
-
-# In[27]:
-
-
-infer(x_test, model=model)
-
-
-# In[30]:
-
-
-df_test = pd.DataFrame(model.predict(x_test), columns=CLASSES)
-df_true = pd.DataFrame(y_test, columns=CLASSES)
-
-
-# In[32]:
-
-
-label_acc = (df_test - df_true).abs().sum() / len(df_test)
-
-
-# In[38]:
-
-
-name = '_'.join([''.join((label, str(int(acc*100)))) for (label, acc) in zip(label_acc.index, label_acc.values)])
-name
-
-
-# In[40]:
-
-
-MODEL_FILEPATH = os.path.join(DATA_DIR, f"model_{name}.h5")
-print(f"MODEL_FILEPATH: {MODEL_FILEPATH}")
-model.save(MODEL_FILEPATH)
+    filepath = os.path.join(DATA_DIR, filename)
+    print(f"filepath: {filepath}")
+    model.save(filepath + ".h5")
+    df.to_csv(filepath + ".csv")
 
