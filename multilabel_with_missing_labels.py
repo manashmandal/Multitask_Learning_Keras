@@ -32,6 +32,17 @@ MODEL_FILEPATH = os.path.join(DATA_DIR, 'multitask_model.h5')
 print('DATA_FILEPATH: ' + DATA_FILEPATH)
 assert(os.path.isfile(DATA_FILEPATH))
 
+MISSING_LABEL_PROBS = [0.75, 0.50, 0.25, 0.00]
+CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
+
+batch_size = 50
+num_classes = len(CLASSES)
+epochs = 4
+
+# input image dimensions
+img_rows, img_cols = 100, 100
+channels = 3
+
 
 def load(test_size=.2, random_state=100):
     f = h5py.File(os.path.join(BASE_DIR, 'data', 'dataset.h5'))
@@ -74,21 +85,9 @@ def build_masked_loss(loss_function=K.binary_crossentropy, mask_value=MISSING_LA
 def masked_accuracy(y_true, y_pred):
     dtype = K.floatx()
     total = K.cast(K.sum(K.cast(K.not_equal(y_true, MISSING_LABEL_FLAG), dtype)), dtype)
-    correct = K.sum(K.cast(K.equal(y_true, K.round(y_pred)), dtype)) - K.cast(K.sum(K.cast(K.equal(y_true, MISSING_LABEL_FLAG), dtype)), dtype)
+    correct = K.sum(K.cast(K.equal(y_true, K.round(y_pred)), dtype)) #  - K.cast(K.sum(K.cast(K.equal(y_true, MISSING_LABEL_FLAG), dtype)), dtype)
     return correct / total
 
-
-MISSING_LABEL_PROBS = [0.75, 0.50, 0.25, 0.00]
-CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
-
-batch_size = 50
-num_classes = len(CLASSES)
-epochs = 4
-
-
-# input image dimensions
-img_rows, img_cols = 100, 100
-channels = 3
 
 for missing_label_prob in MISSING_LABEL_PROBS:
     print('Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG}...')
