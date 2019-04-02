@@ -1,14 +1,15 @@
+""" Testing that it's possible to skip missing values by flagging them with -1 (or any other value) if they are ignored in the loss function.
 
-# coding: utf-8
+Test set accuracy is only mildly reduced for a simple CNN image recognition, multi-label problem.
 
-# In[10]:
-
-
-# get_ipython().run_line_magic('matplotlib', 'inline')
+Reference:
+   Masked loss function approach by @tivaro: https://github.com/keras-team/keras/issues/3893
+   Merge and Mask layers per Francois Chollet (@fchollet): https://github.com/keras-team/keras/issues/3206 
+"""
 import os
 
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import pandas as pd
 import h5py
 from sklearn.model_selection import train_test_split
@@ -31,6 +32,7 @@ MODEL_FILEPATH = os.path.join(DATA_DIR, 'multitask_model.h5')
 print('DATA_FILEPATH: ' + DATA_FILEPATH)
 assert(os.path.isfile(DATA_FILEPATH))
 
+
 def load(test_size=.2, random_state=100):
     f = h5py.File(os.path.join(BASE_DIR, 'data', 'dataset.h5'))
     x = f['x'].value
@@ -50,7 +52,7 @@ x_train, x_test, y_train_orig, y_test = load()
 MISSING_LABEL_FLAG = -1
 
 
-def build_masked_loss(loss_function, mask_value=MISSING_LABEL_FLAG):
+def build_masked_loss(loss_function=K.binary_crossentropy, mask_value=MISSING_LABEL_FLAG):
     """Builds a loss function that masks based on targets
 
     Args:
@@ -68,14 +70,15 @@ def build_masked_loss(loss_function, mask_value=MISSING_LABEL_FLAG):
 
     return masked_loss_function
 
+
 def masked_accuracy(y_true, y_pred):
     dtype = K.floatx()
-    total = K.cast(K.sum(K.cast(K.not_equal(y_true, MASK_VALUE), dtype)), dtype)
-    correct = K.sum(K.cast(K.equal(y_true, K.round(y_pred)), dtype))
+    total = K.cast(K.sum(K.cast(K.not_equal(y_true, MISSING_LABEL_FLAG), dtype)), dtype)
+    correct = K.sum(K.cast(K.equal(y_true, K.round(y_pred)), dtype)) - K.cast(K.sum(K.cast(K.equal(y_true, MISSING_LABEL_FLAG), dtype)), dtype)
     return correct / total
 
 
-MISSING_LABEL_PROBS = [0, .25, .5, .75]
+MISSING_LABEL_PROBS = [0.75, 0.50, 0.25, 0.00]
 CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
 
 batch_size = 50
@@ -88,6 +91,7 @@ img_rows, img_cols = 100, 100
 channels = 3
 
 for missing_label_prob in MISSING_LABEL_PROBS:
+    print('Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG}...')
     y_train = y_train_orig.copy()
     mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
     y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
@@ -122,9 +126,9 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     # Merge([network_outputs, Masking(mask_value=MISSING_LABEL_FLAG)(mask_input)], mode=lambda xs: xs[0], output_mask=lambda xs: xs[1])
 
 
-    model.compile(loss=build_masked_loss(K.binary_crossentropy),
+    model.compile(loss=build_masked_loss(),
                 optimizer='adam',
-                metrics=['accuracy'])
+                metrics=[masked_accuracy])
 
     model.fit(x_train, y_train,
             batch_size=batch_size,
@@ -154,7 +158,7 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     df_true = pd.DataFrame(y_test, columns=['true_' + c for c in CLASSES])
     df = pd.concat([df_test, df_true], axis=1)
 
-    label_acc = np.sum(np.abs((df_test.values - df_true.values)), axis=0) / len(df_test)
+    label_acc = 1.0 - np.sum(np.abs((df_test.values - df_true.values)), axis=0) / len(df_test)
     name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
     filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
 
