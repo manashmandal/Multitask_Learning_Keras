@@ -3,7 +3,7 @@
 (or any other value) if they are ignored in the loss function.
 
 Test set accuracy is only mildly reduced for a simple CNN image recognition, multi-label problem. 
-But it's only ~75% accurate with 0 missing labels, which is piss poor.
+But it's only ~80% accurate with no missing labels, and 5 mulihot labels, which is piss poor.
 
 Francois Chollet suggests using the Merge and Masking layers to mask the input.[1]
     ## 
@@ -179,13 +179,13 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     for c in CLASSES:
         labels = (f'not_{c}', f'{c}')
         confusion = pd.DataFrame(
-            confusion_matrix(df_true[c], df_pred[c]),
+            confusion_matrix(df['true_' + c], df['pred_' + c]),
             columns=[f'pred_{labels[0]}', f'{labels[0]}'],
             index=[f'true_{labels[0]}', f'{labels[0]}'])
         confusions[-1].append(confusion)
         print(confusion)
         print(classification_report(df_true[c], df_pred[c], labels=labels))
-    label_acc = 1.0 - np.sum(np.abs((df_test.values - df_true.values)), axis=0) / len(df_test)
+    label_acc = 1.0 - np.sum(np.abs((df_pred.values - df_true.values)), axis=0) / len(df_test)
     name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
     filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
 
