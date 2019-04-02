@@ -17,6 +17,7 @@ Reference:
    [3] https://github.com/keras-team/keras/issues/3206#issuecomment-232446030
 """
 import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -49,9 +50,7 @@ assert(os.path.isfile(DATA_FILEPATH))
 MISSING_LABEL_PROBS = [0.75, 0.50, 0.25, 0.00]
 CLASSES = np.array(['desert', 'mountain', 'sea', 'sunset', 'trees'])
 
-batch_size = 50
 num_classes = len(CLASSES)
-epochs = 4
 
 # input image dimensions
 img_rows, img_cols = 100, 100
@@ -135,68 +134,80 @@ def compile_model(   dropouts=[   .25,    .25,  .5],
     return model
 
 
-confusions = []
-testset_preds = []
-
-for missing_label_prob in MISSING_LABEL_PROBS:
-    print(f'Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG} (flag them as missing).')
-    y_train = y_train_orig.copy()
-    mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
-    y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
-
-    model = compile_model()
-
-    model.fit(x_train, y_train,
-            batch_size=batch_size,
-            epochs=epochs,
-            verbose=1,
-            validation_data=(x_test, y_test))
-
-
-    def infer(input_data, model=model):
-        labels = []
-        y_pred = model.predict(input_data)
+def infer(input_data, model):
+    labels = []
+    y_pred = model.predict(input_data)
+    
+    # Performing masking
+    y_pred = (y_pred > 0.5) * 1.0
+    
+    for i in range(y_pred.shape[0]):
+        # select the indices
+        indices = np.where(y_pred[i] == 1.0)[0]
+        # Adding the results 
+        labels.append(CLASSES[indices].tolist())
         
-        # Performing masking
-        y_pred = (y_pred > 0.5) * 1.0
-        
-        for i in range(y_pred.shape[0]):
-            # select the indices
-            indices = np.where(y_pred[i] == 1.0)[0]
-            # Adding the results 
-            labels.append(CLASSES[indices].tolist())
-            
-        return labels
+    return labels
 
 
-    infer(x_test, model=model)
-    df_pred = pd.DataFrame(model.predict(x_test), columns=['pred_' + c for c in CLASSES])
-    df_true = pd.DataFrame(y_test, columns=['true_' + c for c in CLASSES])
-    df = pd.concat([df_pred, df_true], axis=1)
-    print(df.head())
-    testset_preds.append(df)
-    confusions.append([])
-    for c in CLASSES:
-        labels = (f'not_{c}', f'{c}')
-        confusion = pd.DataFrame(
-            confusion_matrix(df['true_' + c], df['pred_' + c]),
-            columns=[f'pred_{labels[0]}', f'{labels[0]}'],
-            index=[f'true_{labels[0]}', f'{labels[0]}'])
-        confusions[-1].append(confusion)
-        print(confusion)
-        print(classification_report(df_true[c], df_pred[c], labels=labels))
-    label_acc = 1.0 - np.sum(np.abs((df_pred.values - df_true.values)), axis=0) / len(df_test)
-    name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
-    filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
+def run_trade_study(num_epochs=10, batch_size=50, missing_label_probabilities=MISSING_LABEL_PROBS):
+    confusions = []
+    testset_preds = []
 
-    filepath = os.path.join(DATA_DIR, filename)
-    print(f"filepath: {filepath}")
-    model.save(filepath + ".h5")
-    df.to_csv(filepath + ".csv")
+    for missing_label_prob in missing_label_probabilities:
+        print(f'Setting {int(missing_label_prob * 100)}% of the labels to {MISSING_LABEL_FLAG} (flag them as missing).')
+        y_train = y_train_orig.copy()
+        mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
+        y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
+
+        model = compile_model()
+
+        model.fit(x_train, y_train,
+                batch_size=batch_size,
+                epochs=num_epochs,
+                verbose=1,
+                validation_data=(x_test, y_test))
+
+        infer(x_test, model=model)
+        df_pred = pd.DataFrame(model.predict(x_test), columns=['pred_' + c for c in CLASSES])
+        df_true = pd.DataFrame(y_test, columns=['true_' + c for c in CLASSES])
+        df = pd.concat([df_pred, df_true], axis=1)
+        print(df.head())
+        testset_preds.append(df)
+        confusions.append([])
+        for c in CLASSES:
+            labels = (f'not_{c}', f'{c}')
+            confusion = pd.DataFrame(
+                confusion_matrix(df['true_' + c], df['pred_' + c]),
+                columns=[f'pred_{labels[0]}', f'{labels[0]}'],
+                index=[f'true_{labels[0]}', f'{labels[0]}'])
+            confusions[-1].append(confusion)
+            print(confusion)
+            print(classification_report(df_true[c], df_pred[c], labels=labels))
+        label_acc = 1.0 - np.sum(np.abs((df_pred.values - df_true.values)), axis=0) / len(df_test)
+        name = '_'.join([f'{label}{int(acc*100):02}' for (label, acc) in zip(CLASSES, label_acc)])
+        filename = f"{int(missing_label_prob * 100):02}pct-missing-labels_{name}"
+
+        filepath = os.path.join(DATA_DIR, filename)
+        print(f"filepath: {filepath}")
+        model.save(filepath + ".h5")
+        df.to_csv(filepath + ".csv")
+    
+    # should save results in one big h5:
+    # print(confusions)
+    # print([df.head() for df in testset_preds])
+    return testset_preds, confusions
 
 
-# should save results in one big h5:
-# print(confusions)
-# print([df.head() for df in testset_preds])
+if __name__ == '__main__':
+    num_epochs = 10
+    if len(sys.argv[1:]):
+        num_epochs = int(sys.argv[1])
+    batch_size = 50
+    if len(sys.argv[2:]):
+        batch_size = int(sys.argv[2])
+    run_trade_study(num_epochs=num_epochs, batch_size=batch_size)
+
+
 
 
