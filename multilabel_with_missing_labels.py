@@ -103,6 +103,38 @@ def masked_accuracy(y_true, y_pred):
     return correct / total
 
 
+def compile_model(   dropouts=[   .25,    .25,  .5],
+                  num_neurons=[32, 32, 64, 64, 512, num_classes],
+                  activations=['relu'] * 5 +       ['sigmoid'] ):
+    model = Sequential()
+    model.add(Conv2D(num_neurons[0], kernel_size=(3, 3),
+        padding='same', input_shape=(img_rows, img_cols, channels)))
+    model.add(Activation(activations[0]))
+    model.add(Conv2D(num_neurons[1], (3, 3)))
+    model.add(Activation(activations[1]))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(dropouts[0]))
+
+    model.add(Conv2D(num_neurons[2],(3, 3), padding='same'))
+    model.add(Activation(activations[2]))
+    model.add(Conv2D(num_neurons[3], (3, 3)))
+    model.add(Activation(activations[3]))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(dropouts[1]))
+
+    model.add(Flatten())
+    model.add(Dense(num_neurons[-2]))
+    model.add(Activation(activations[-2]))
+    model.add(Dropout(dropouts[-1]))
+    model.add(Dense(num_neurons[-1]))
+    model.add(Activation(activations[-1]))
+
+    model.compile(loss=build_masked_loss(),
+                optimizer='adam',
+                metrics=[masked_accuracy])
+    return model
+
+
 confusions = []
 testset_preds = []
 
@@ -112,32 +144,7 @@ for missing_label_prob in MISSING_LABEL_PROBS:
     mask_labels_to_remove = np.random.rand(*y_train.shape) < missing_label_prob
     y_train[mask_labels_to_remove] = MISSING_LABEL_FLAG
 
-    model = Sequential()
-    model.add(Conv2D(32, kernel_size=(3, 3),
-        padding='same', input_shape=(img_rows, img_cols, channels)))
-    model.add(Activation('relu'))
-    model.add(Conv2D(32, (3, 3)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.25))
-
-    model.add(Conv2D(64,(3, 3), padding='same'))
-    model.add(Activation('relu'))
-    model.add(Conv2D(64, (3, 3)))
-    model.add(Activation('relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.25))
-
-    model.add(Flatten())
-    model.add(Dense(512))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(num_classes))
-    model.add(Activation('sigmoid'))
-
-    model.compile(loss=build_masked_loss(),
-                optimizer='adam',
-                metrics=[masked_accuracy])
+    model = compile_model()
 
     model.fit(x_train, y_train,
             batch_size=batch_size,
